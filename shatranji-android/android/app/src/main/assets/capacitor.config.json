@@ -1,0 +1,9 @@
+{
+	"appId": "com.zead.shatranji",
+	"appName": "الشطرنجي",
+	"webDir": "www",
+	"backgroundColor": "#1F2B35",
+	"android": {
+		"allowMixedContent": false
+	}
+}
