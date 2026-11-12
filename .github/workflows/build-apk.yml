@@ -3,14 +3,22 @@ on:
   workflow_dispatch:
   push:
     branches: [main, master]
-defaults:
-  run:
-    working-directory: shatranji-android
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Locate the project folder
+        id: p
+        run: |
+          f=$(find . -name capacitor.config.json -not -path "*/node_modules/*" -not -path "*/android/*" | head -n 1)
+          if [ -z "$f" ]; then
+            echo "ERROR: capacitor.config.json not found. Repo layout:"; find . -maxdepth 3 -not -path "./.git/*" | head -n 60; exit 1
+          fi
+          d=$(dirname "$f"); echo "Project dir: $d"; echo "dir=$d" >> "$GITHUB_OUTPUT"
+          test -f "$d/android/gradlew" || { echo "ERROR: $d/android/gradlew missing"; ls -la "$d"; exit 1; }
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -19,14 +27,36 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: android-actions/setup-android@v3
-      - run: npm install --no-audit --no-fund
-      - run: npx cap sync android
-      - name: Build debug APK
-        working-directory: shatranji-android/android
+
+      - name: Install Android SDK pieces
         run: |
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Install JS dependencies
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: npm install --no-audit --no-fund
+
+      - name: Sync web files into Android
+        working-directory: ${{ steps.p.outputs.dir }}
+        run: npx cap sync android
+
+      - name: Build debug APK
+        working-directory: ${{ steps.p.outputs.dir }}/android
+        run: |
+          sh ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee ../build.log
+          exit ${PIPESTATUS[0]}
+        shell: bash
+
       - uses: actions/upload-artifact@v4
         with:
           name: shatranji-apk
-          path: shatranji-android/android/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ steps.p.outputs.dir }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: ${{ steps.p.outputs.dir }}/build.log
+          if-no-files-found: ignore
